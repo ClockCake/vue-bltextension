@@ -1,8 +1,19 @@
 <script setup>
-import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, watch } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 
 const router = useRouter()
+const route = useRoute()
+
+// 监听路由变化，通知原生端
+watch(() => route.path, (newPath) => {
+  // 通知原生路由已变化
+  if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.routeChange) {
+    window.webkit.messageHandlers.routeChange.postMessage({
+      path: newPath
+    })
+  }
+}, { immediate: true }) // immediate: true 确保页面加载时也触发
 
 // 模拟合同数据
 const contracts = ref([
@@ -59,11 +70,28 @@ const deleteContract = (event, id) => {
   // 阻止事件冒泡，避免触发卡片点击
   event.stopPropagation()
 
-  if (confirm('确认要删除这份合同吗？')) {
-    const index = contracts.value.findIndex(c => c.id === id)
-    if (index > -1) {
-      contracts.value.splice(index, 1)
+  // 调用原生方法显示确认弹窗
+  if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.deleteContract) {
+    window.webkit.messageHandlers.deleteContract.postMessage({
+      id: id
+    })
+  } else {
+    // 降级方案：浏览器 confirm
+    if (confirm('确认要删除这份合同吗？')) {
+      performDelete(id)
     }
+  }
+}
+
+// 执行删除操作（供原生端回调）
+window.confirmDelete = (id) => {
+  performDelete(id)
+}
+
+const performDelete = (id) => {
+  const index = contracts.value.findIndex(c => c.id === id)
+  if (index > -1) {
+    contracts.value.splice(index, 1)
   }
 }
 </script>
