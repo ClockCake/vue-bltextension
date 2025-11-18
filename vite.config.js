@@ -12,6 +12,13 @@ export default defineConfig({
     host: '0.0.0.0',
     port: 9999,
     allowedHosts: ['blt.iweekly.top'],
+    proxy: {
+      '/api': {
+        target: 'https://api.tuzufang.com.cn',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api/, '')
+      }
+    }
   },
   resolve: {
     alias: {

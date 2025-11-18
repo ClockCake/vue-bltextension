@@ -1,5 +1,5 @@
 <script setup>
-import { reactive, onMounted } from 'vue'
+import { reactive, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 
 const route = useRoute()
@@ -7,8 +7,7 @@ const route = useRoute()
 // 从 URL 参数获取外部传入的数据
 const externalParams = reactive({
   userId: '',
-  token: '',
-  // 可以添加更多外部参数
+  pushId: '',
 })
 
 const formData = reactive({
@@ -28,11 +27,13 @@ const formData = reactive({
   otherMatters: ''
 })
 
+const isSubmitting = ref(false)
+
 // 页面加载时获取 URL 参数
 onMounted(() => {
   // 从 URL 获取参数
-  externalParams.userId = route.query.userId || ''
-  externalParams.token = route.query.token || ''
+  externalParams.userId = route.query.user_id || ''
+  externalParams.pushId = route.query.push_id || ''
 
   console.log('接收到的外部参数:', externalParams)
 
@@ -44,11 +45,11 @@ onMounted(() => {
 const handleNativeMessage = (event) => {
   console.log('收到原生消息:', event.data)
   // 可以在这里处理原生传来的数据
-  if (event.data.userId) {
-    externalParams.userId = event.data.userId
+  if (event.data.user_id) {
+    externalParams.userId = event.data.user_id
   }
-  if (event.data.token) {
-    externalParams.token = event.data.token
+  if (event.data.push_id) {
+    externalParams.pushId = event.data.push_id
   }
 }
 
@@ -290,7 +291,7 @@ const validateOtherMatters = () => {
 }
 
 // 提交表单
-const handleSubmit = () => {
+const handleSubmit = async () => {
   // 验证所有字段
   validateTenantPhone()
   validateLandlordPhone()
@@ -314,27 +315,88 @@ const handleSubmit = () => {
     return
   }
 
-  // TODO: 提交表单数据到后端
-  const submitData = {
-    ...formData,
-    ...externalParams, // 合并外部参数
+  // 检查必需的外部参数
+  if (!externalParams.userId) {
+    alert('缺少用户ID参数')
+    return
   }
 
-  console.log('提交表单:', submitData)
+  if (!externalParams.pushId) {
+    alert('缺少行程ID参数')
+    return
+  }
 
-  // 可以通过 postMessage 通知原生页面
-  if (window.ReactNativeWebView) {
-    // React Native WebView
-    window.ReactNativeWebView.postMessage(JSON.stringify(submitData))
-  } else if (window.webkit?.messageHandlers?.submitContract) {
-    // iOS WKWebView
-    window.webkit.messageHandlers.submitContract.postMessage(submitData)
-  } else if (window.android?.submitContract) {
-    // Android WebView
-    window.android.submitContract(JSON.stringify(submitData))
-  } else {
-    // 普通浏览器环境
-    alert('合同创建成功!')
+  // 提交表单数据到后端
+  isSubmitting.value = true
+
+  try {
+    const submitData = {
+      user_id: externalParams.userId,
+      month_rent: formData.monthlyRent,
+      deposit: formData.deposit,
+      start_date: formData.startDate,
+      end_date: formData.endDate,
+      way_rent_desc: formData.paymentMethod,
+      term_desc: formData.leaseTerm,
+      fee_memo: formData.utilities,
+      renter_mobile: formData.tenantPhone,
+      land_mobile: formData.landlordPhone,
+      land_name: formData.landlordName,
+      land_card: formData.landlordIdCard,
+      house_address: formData.propertyAddress,
+      room_detail: formData.buildingNumber,
+      push_id: externalParams.pushId,
+      other_memo: formData.otherMatters
+    }
+
+    console.log('提交表单数据:', submitData)
+
+    const response = await fetch('/api/App402/TfxSelfSupportContract/createContract', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(submitData)
+    })
+
+    const result = await response.json()
+
+    console.log('API响应:', result)
+
+    if (result.code === '0') {
+      // 成功创建合同
+      alert('合同创建成功!')
+
+      // 通知原生端返回上一页
+      if (window.ReactNativeWebView) {
+        // React Native WebView
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'contractCreated',
+          success: true,
+          contractId: result.result?.tfx_contract_id
+        }))
+      } else if (window.webkit?.messageHandlers?.contractCreated) {
+        // iOS WKWebView
+        window.webkit.messageHandlers.contractCreated.postMessage({
+          success: true,
+          contractId: result.result?.tfx_contract_id
+        })
+      } else if (window.android?.onContractCreated) {
+        // Android WebView
+        window.android.onContractCreated(JSON.stringify({
+          success: true,
+          contractId: result.result?.tfx_contract_id
+        }))
+      }
+    } else {
+      // 创建失败
+      alert(result.msg || '创建合同失败，请重试')
+    }
+  } catch (error) {
+    console.error('提交失败:', error)
+    alert('网络错误，请检查网络连接后重试')
+  } finally {
+    isSubmitting.value = false
   }
 }
 </script>
@@ -343,7 +405,6 @@ const handleSubmit = () => {
   <div class="container">
     <main class="main-content">
       <form class="contract-form" @submit.prevent="handleSubmit">
-        <h2 class="form-title">新建租赁合同</h2>
 
         <!-- 租客手机号 -->
         <div class="form-group">
@@ -591,8 +652,8 @@ const handleSubmit = () => {
         </div>
 
         <!-- 提交按钮 -->
-        <button type="submit" class="submit-button">
-          创建合同
+        <button type="submit" class="submit-button" :disabled="isSubmitting">
+          {{ isSubmitting ? '提交中...' : '创建合同' }}
         </button>
       </form>
     </main>
@@ -618,14 +679,6 @@ const handleSubmit = () => {
   border-radius: 12px;
   padding: 1.5rem;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-}
-
-.form-title {
-  font-size: 1.25rem;
-  font-weight: 600;
-  color: #333;
-  margin: 0 0 1.5rem 0;
-  text-align: center;
 }
 
 .form-group {
@@ -716,14 +769,15 @@ const handleSubmit = () => {
   box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
 }
 
+.submit-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 /* 移动端优化 */
 @media (max-width: 768px) {
   .contract-form {
     padding: 1.25rem;
-  }
-
-  .form-title {
-    font-size: 1.1rem;
   }
 
   .form-input,
